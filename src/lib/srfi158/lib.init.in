@@ -32,8 +32,10 @@
 
 
 (cond-expand
-   (bigloo-compile
-    (use-library! 'pthread))
+   ((and bigloo-jvm bigloo-compile)
+    (use-library! 'pthread)
+    (use-library! 'bigloo-concurrent)
+    (use-library! 'srfi117))
    (bigloo-eval
     #unspecified))
 

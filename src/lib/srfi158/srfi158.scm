@@ -25,7 +25,30 @@
 ;;;; OTHER DEALINGS IN THE SOFTWARE.
 
 (module srfi158
-   (library pthread)
+   (cond-expand
+      (bigloo-jvm
+       (library pthread
+            bigloo-concurrent)))
+   
+   (extern
+      (include "cnumprocs.h")
+      (macro $get-number-of-processors::long ()
+             "bgl_get_number_of_processors")
+
+      (include "ccoroutine.h")
+      (type %coroutine
+         (struct)
+         "struct bgl_coroutine")
+      (macro $make-coroutine::%coroutine* (thunk::procedure) "bgl_make_coroutine")
+      (macro $coroutine-yield::obj (cor::%coroutine* val::obj) "bgl_coroutine_yield")
+      (macro $coroutine-call::obj (cor::%coroutine*) "bgl_coroutine_call")
+      (macro $coroutine-finalize::void (cor::%coroutine* val::obj) "bgl_coroutine_finalize"))
+
+   (java
+      (class processor_utils
+         (method static $get-number-of-processors::long () "bgl_get_number_of_processors")
+         "bigloo.lib.srfi158.processor_utils"))
+   
    (export (generator . args)
            (circular-generator . args)
            (make-coroutine-generator proc::procedure)
@@ -80,7 +103,8 @@
            (sum-accumulator)
            (product-accumulator)
            make-iota-generator
-           make-range-generator))
+           make-range-generator)
+   )
 
 
 ;; utilities and macros needed to adapt srfi158 to Bigloo  
@@ -149,8 +173,11 @@
                 body ...))))
 
 
-;; bytevectors are u8vectors in Bigloo  
-(define make-bytevector make-u8vector)
+;; bytevectors are u8vectors in Bigloo
+(define-inline (make-bytevector size #!optional (default #u8:0))
+   (make-u8vector size default))
+
+;(define make-bytevector make-u8vector)
 
 (define bytevector-u8-set! u8vector-set!)
 
@@ -161,7 +188,13 @@
 (define (srfi158-error msg . args)
    (error "srfi158" msg args))
 
-
+(define (get-number-of-processors)
+   (cond-expand
+      (bigloo-c
+       ($get-number-of-processors)
+       )
+      (bigloo-jvm
+       (processor_utils-$get-number-of-processors))))
 
 ;; list->bytevector
 (define (list->bytevector list)
@@ -232,55 +265,89 @@
 
 
 
-;; for Bigloo, we implement coroutines with threads 
-;; make-coroutine-generator
-(define (make-coroutine-generator proc::procedure)
-   (letrec ((state 'init)
-            (result #unspecified)
-            (mutex (make-mutex))
-            (condv (make-condition-variable))
-            (thread
-               (instantiate::pthread
-                  (body (lambda ()
-                           (let ((res (proc (lambda (v)
-                                               (synchronize mutex
-                                                  (set! result v)
-                                                  (condition-variable-signal! condv)
-                                                  (if (eof-object? result)
-                                                      result
-                                                      (condition-variable-wait! condv mutex)))))))
-                              (synchronize mutex
-                                 (set! state 'finished)
-                                 (set! result (eof-object))
-                                 (condition-variable-signal! condv)
-                                 )
-                              ))))))
-      (lambda ()
-         (case state
-               ((init)
-                (synchronize mutex
-                   (set! state 'running)
-                   (thread-start! thread)
-                   (condition-variable-wait! condv mutex)
-                   result))
-               ((running)
-                (synchronize mutex
-                   (condition-variable-signal! condv)
-                   (condition-variable-wait! condv mutex)
-                   result))
-               (else
-                result)))))
 
-; (define (make-coroutine-generator proc)
-;   (define return #f)
-;   (define resume #f)
-;   (define yield (lambda (v) (call/cc (lambda (r) (set! resume r) (return v)))))
-;   (lambda () (call/cc (lambda (cc) (set! return cc)
-;                         (if resume
-;                           (resume (if #f #f))  void? or yield again?
-;                           (begin (proc yield)
-;                                  (set! resume (lambda (v) (return (eof-object))))
-;                                  (return (eof-object))))))))
+(cond-expand
+
+   ;; For the native backend, we use actual coroutines, based on
+   ;; makecontext, for make-coroutine-generator. In my, admittedly,
+   ;; unscientific benchmarking, this implementation is 4-5 times faster
+   ;; than the thread-based implementation.
+   (bigloo-c
+    
+    (define (make-coroutine-generator proc::procedure)
+       (letrec  ((thunk (lambda () (let ((res (proc (lambda (v)
+                                                       ($coroutine-yield cor v)))))
+                                      ($coroutine-finalize cor (eof-object)))))
+                 (cor::%coroutine* ($make-coroutine thunk)))
+          (lambda ()
+             ($coroutine-call cor)))))
+
+   ;; For the jvm backend, we use threads and a dedicated threadpool to emulate coroutines. 
+   (bigloo-jvm
+
+    (define +generator-mutex+ (make-mutex))
+    (define +generator-thread-pool+ #unspecified)
+    (define (generator-thread-pool)
+       (synchronize +generator-mutex+
+          (when (eq? +generator-thread-pool+ #unspecified)
+             (set! +generator-thread-pool+ (make-thread-pool (get-number-of-processors))))
+          +generator-thread-pool+))
+    
+    
+    (define +corroutine-calling+ '(list corroutine-calling))
+
+    (define (make-coroutine-generator proc::procedure)
+       (letrec ((state 'init)
+                (result #unspecified)
+                (mutex (make-mutex))
+                (condv (make-condition-variable))
+                (wait-on-condition! (lambda (condv mutex pred)
+                                       ;; a loop checking our condition
+                                       ;; predicate to make sure we are
+                                       ;; not dealing with a spurious
+                                       ;; wakeup
+                                       (let loop ()
+                                          (condition-variable-wait! condv mutex)
+                                          (when (not (pred))
+                                             (loop)))))
+                (start (lambda ()
+                          (thread-pool-push-task! (generator-thread-pool)
+                             (lambda ()
+                                (let ((res
+                                         (proc (lambda (v)
+                                                  (synchronize mutex
+                                                     (set! result v)
+                                                     (condition-variable-signal! condv)
+                                                     (if (eof-object? result)
+                                                         result
+                                                         (wait-on-condition! condv mutex
+                                                            (lambda () (eq? result +corroutine-calling+)))
+                                                         
+                                                         ))))))
+                                   (synchronize mutex
+                                      (set! state 'finished)
+                                      (set! result (eof-object))
+                                      (condition-variable-signal! condv))))))))
+          (lambda ()
+             (case state
+                ((init)
+                 (synchronize mutex
+                    (set! state 'running)
+                    (set! result +corroutine-calling+)
+                    (start)
+                    (wait-on-condition! condv mutex
+                       (lambda () (not (eq? result +corroutine-calling+))))
+                    result))
+                ((running)
+                 (synchronize mutex
+                    (set! result +corroutine-calling+)
+                    (condition-variable-signal! condv)
+                    (wait-on-condition! condv mutex
+                       (lambda () (not (eq? result +corroutine-calling+))))
+                    result))
+                (else
+                 result)))))
+    ))
 
 
 ;; list->generator
@@ -341,7 +408,6 @@
 
 
 ;; make-for-each-generator
-;FIXME: seems to fail test
 (define (make-for-each-generator for-each obj)
   (make-coroutine-generator (lambda (yield) (for-each yield obj))))
 

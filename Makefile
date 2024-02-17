@@ -28,6 +28,8 @@ SED = sed
 
 BIGLOO_VERSION = $(shell $(BIGLOO) -eval "(print (bigloo-config 'release-number)) (exit 0)" -q)
 
+BIGLOO_LIB_DIR = $(shell $(BIGLOO) -eval "(print (bigloo-config 'library-directory)) (exit 0)" -q)
+
 PROJECT_DIR = $(shell pwd)
 
 # The default install prefix and installation paths
@@ -82,16 +84,19 @@ BLFLAGS_s = $(BLFLAGS_COMMON)
 BLFLAGS_p = $(BLFLAGS_COMMON)
 
 #Add BIGLOO libraries (e.g., -lpthread)
-BLDFLAGS_COMMON =
+BLDFLAGS_COMMON = -lc 
 BLDFLAGS_u = $(BLDFLAGS_COMMON)
 BLDFLAGS_s = $(BLDFLAGS_COMMON)
 BLDFLAGS_p = $(BLDFLAGS_COMMON)
 
 # Add cflags to bigloo via -copt 
 BCFLAGS_COMMON = 
-BCFLAGS_u = $(BCFLAGS_COMMON)
+BCFLAGS_u = $(BCFLAGS_COMMON)	
 BCFLAGS_s = $(BCFLAGS_COMMON)
 BCFLAGS_p = $(BCFLAGS_COMMON)
+
+#Add Bigloo include directories to CFLAGS
+CFLAGS += -I $(BIGLOO_LIB_DIR) -fPIC
 
 # Additional java libraries should be added here
 CLASSPATH_COMMON =
@@ -293,10 +298,11 @@ define scm_lib_pattern_rules
 LIB_$2_BFLAGS_$1 += $$(BFLAGS_$1)
 LIB_$2_BCFLAGS_$1 += $$(BCFLAGS_$1)
 LIB_$2_BLFLAGS_$1 += $$(BLFLAGS_$1)
+LIB_$2_BLDFLAGS_$1 += $$(BLDFLAGS_$1)
 
 .Olib_$1/lib/$2/%.o: $(SRC_DIR)/lib/$2/%.scm
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
-	@$$(BIGLOO) $$(LIB_$2_BFLAGS_$1) -mkaddlib $$(LIB_$2_BCFLAGS_$1:%=-copt %) $$(LIB_$2_BLFLAGS_$1) $$(LIB_$2_INCLUDE_FLAGS) $$< -o $$@ -c
+	@$$(BIGLOO) $$(LIB_$2_BFLAGS_$1) -mkaddlib $$(LIB_$2_BCFLAGS_$1:%=-copt %) $$(LIB_$2_BLFLAGS_$1) $$(LIB_$2_INCLUDE_FLAGS) $$(LIB_$2_C_INCLUDE_DIRS:%=-copt " -I %") $$< -o $$@ -c
 
 .class_$1/bigloo/lib/$2/%.class: $(SRC_DIR)/lib/$2/%.scm
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
@@ -311,7 +317,7 @@ BIN_$2_BLFLAGS_$1 += $$(BLFLAGS_$1)
 
 .Olib_$1/bin/$2/%.o: $(SRC_DIR)/bin/$2/%.scm
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
-	@$$(BIGLOO) $$(BIN_$2_BFLAGS_$1) $$(BIN_$2_BCFLAGS_$1:%=-copt %) $$(BIN_$2_BLFLAGS_$1) $$($2_INCLUDE_FLAGS) $$< -o $$@ -c
+	@$$(BIGLOO) $$(BIN_$2_BFLAGS_$1) $$(BIN_$2_BCFLAGS_$1:%=-copt %) $$(BIN_$2_BLFLAGS_$1) $$($2_INCLUDE_FLAGS) $$($2_C_INCLUDE_DIRS:%=-copt " -I %") $$< -o $$@ -c
 
 .class_$1/bigloo/bin/$2/%.class: $(SRC_DIR)/bin/$2/%.scm
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
@@ -452,7 +458,7 @@ ifneq ($$($1_JAVA_CLASSES_$2),)
 $$($1_JAVA_CLASSES_$2) &: $$($1_JAVA_SOURCES_$2)
 	@(cd $(SRC_BIN_DIR)/$1/$(FFI_JAVA_SRC_DIR) && \
          $(JAVAC) -sourcepath "$(SRC_BIN_DIR)/$1/$(FFI_JAVA_SRC_DIR)" \
-                  -classpath "$(CLASS_PATH_$2):../../../../.class_$2" \
+                  -classpath "$(CLASSPATH_$2):../../../../.class_$2" \
                   -d ../../../../.class_$2 $$(subst $(SRC_BIN_DIR)/$1/$(FFI_JAVA_SRC_DIR)/,,$$^))
 endif
 endef
@@ -464,7 +470,7 @@ ifneq ($$(ZIP_$1_JAVA_CLASSES_$2),)
 $$(ZIP_$1_JAVA_CLASSES_$2) &: $$(ZIP_$1_JAVA_SOURCES_$2)
 	@(cd $(SRC_LIB_DIR)/$1/$(FFI_JAVA_SRC_DIR) && \
          $(JAVAC) -sourcepath "$(SRC_LIB_DIR)/$1/$(FFI_JAVA_SRC_DIR)" \
-                  -classpath "$(CLASS_PATH_$2):../../../../.class_$2" \
+                  -classpath "$(CLASSPATH_$2):../../../../.class_$2" \
                   -d ../../../../.class_$2 $$(subst $(SRC_LIB_DIR)/$1/$(FFI_JAVA_SRC_DIR)/,,$$^))
 endif
 endef
@@ -515,7 +521,7 @@ define lib_TARGET_RULES
 $(BUILD_LIB_DIR)/lib$1_$2-$(VERSION).$(SHARED_LIBRARY_EXT): $(AFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.heap $$(LIB_$1_OBJECTS_$2)
 	@echo "building $$@..."
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
-	@$(BIGLOO) -y -o $$@  $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS) -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_OBJECTS_$2)
+	@$(BIGLOO) -y -o $$@  $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS) -ldopt $$(LIB_$1_BLDFLAGS_$2)  -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_OBJECTS_$2)
 
 $(BUILD_LIB_DIR)/lib$1_$2-$(VERSION).$(STATIC_LIBRARY_EXT): $(AFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.heap $$(LIB_$1_OBJECTS_$2) 
 	@echo "building $$@..."
@@ -526,25 +532,25 @@ $(BUILD_LIB_DIR)/lib$1_$2-$(VERSION).$(STATIC_LIBRARY_EXT): $(AFILE) $(BUILD_LIB
 $(BUILD_LIB_DIR)/lib$1_e$2-$(VERSION).$(SHARED_LIBRARY_EXT): $(AFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.heap $$(LIB_$1_HEAP_OBJECTS_$2)  
 	@echo "building $$@..."
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
-	@$(BIGLOO) -y -o $$@  $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS) -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_HEAP_OBJECTS_$2)
+	@$(BIGLOO) -y -o $$@  $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS) -ldopt $$(LIB_$1_BLDFLAGS_$2) -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_HEAP_OBJECTS_$2)
 
 $(BUILD_LIB_DIR)/lib$1_$2_mt-$(VERSION).$(SHARED_LIBRARY_EXT): $(AFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.heap $$(LIB_$1_OBJECTS_$2) 
 	@echo "building $$@..."
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
 	@$(BIGLOO) -y -o $$@ -eval '(set! *multi-threaded-gc?* #t)' \
-                   $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS)  -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_OBJECTS_$2)
+                   $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS) -ldopt $$(LIB_$1_BLDFLAGS_$2)  -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_OBJECTS_$2)
 
 $(BUILD_LIB_DIR)/lib$1_e$2_mt-$(VERSION).$(SHARED_LIBRARY_EXT): $(AFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.heap $$(LIB_$1_HEAP_OBJECTS_$2)
 	@echo "building $$@..."
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
 	@$(BIGLOO) -y -o $$@ -eval '(set! *multi-threaded-gc?* #t)' \
-                   $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS)  -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_HEAP_OBJECTS_$2)
+                   $$(LIB_$1_BLFLAGS_$2) $$(LIB_$1_INCLUDE_FLAGS)  -ldopt $$(LIB_$1_BLDFLAGS_$2) -ldpostopt -Wl,-soname=`basename $$@` $$(LIB_$1_HEAP_OBJECTS_$2)
 endef
 
 $(foreach T,$(LIB_TARGETS),$(foreach V,$(VARIANT_SUFFIXES),$(eval $(call lib_TARGET_RULES,$T,$V))))
 
 define zip_TARGET_RULES
-$(BUILD_LIB_DIR)/$1_$2-$(VERSION).zip: $(AFILE) $(JFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.jheap $$(ZIP_$1_CLASSES_$2) 
+$(BUILD_LIB_DIR)/$1_$2-$(VERSION).zip: $(AFILE) $(JFILE) $(BUILD_LIB_DIR)/$1.init $(BUILD_LIB_DIR)/$1.jheap $$(ZIP_$1_CLASSES_$2) $$(ZIP_$1_JAVA_CLASSES_$2) 
 	@echo "building $$@..."
 	@if [ ! -d "$$(@D)" ]; then  mkdir -p $$(@D); fi
 	@$(JAR) $(JARFLAGS) $$@  $$(ZIP_$1_CLASSES_$2:.class_$2/%=-C .class_$2/ .)
