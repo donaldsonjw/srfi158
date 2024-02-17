@@ -51,7 +51,7 @@
    
    (export (generator . args)
            (circular-generator . args)
-           (make-coroutine-generator proc::procedure)
+           (make-coroutine-generator proc::procedure #!optional (buffer-size 8))
            (list->generator lst)
            vector->generator
            reverse-vector->generator
@@ -270,11 +270,11 @@
 
    ;; For the native backend, we use actual coroutines, based on
    ;; makecontext, for make-coroutine-generator. In my, admittedly,
-   ;; unscientific benchmarking, this implementation is 4-5 times faster
+   ;; unscientific benchmarking, it is slightly faster
    ;; than the thread-based implementation.
    (bigloo-c
     
-    (define (make-coroutine-generator proc::procedure)
+    (define (make-coroutine-generator proc::procedure #!optional (buffer-size 8))
        (letrec  ((thunk (lambda () (let ((res (proc (lambda (v)
                                                        ($coroutine-yield cor v)))))
                                       ($coroutine-finalize cor (eof-object)))))
@@ -293,61 +293,30 @@
              (set! +generator-thread-pool+ (make-thread-pool (get-number-of-processors))))
           +generator-thread-pool+))
     
-    
-    (define +corroutine-calling+ '(list corroutine-calling))
-
-    (define (make-coroutine-generator proc::procedure)
+    (define (make-coroutine-generator proc::procedure #!optional (buffer-size 8))
        (letrec ((state 'init)
+                (queue (make-shared-queue buffer-size))
                 (result #unspecified)
-                (mutex (make-mutex))
-                (condv (make-condition-variable))
-                (wait-on-condition! (lambda (condv mutex pred)
-                                       ;; a loop checking our condition
-                                       ;; predicate to make sure we are
-                                       ;; not dealing with a spurious
-                                       ;; wakeup
-                                       (let loop ()
-                                          (condition-variable-wait! condv mutex)
-                                          (when (not (pred))
-                                             (loop)))))
                 (start (lambda ()
                           (thread-pool-push-task! (generator-thread-pool)
                              (lambda ()
-                                (let ((res
-                                         (proc (lambda (v)
-                                                  (synchronize mutex
-                                                     (set! result v)
-                                                     (condition-variable-signal! condv)
-                                                     (if (eof-object? result)
-                                                         result
-                                                         (wait-on-condition! condv mutex
-                                                            (lambda () (eq? result +corroutine-calling+)))
-                                                         
-                                                         ))))))
-                                   (synchronize mutex
-                                      (set! state 'finished)
-                                      (set! result (eof-object))
-                                      (condition-variable-signal! condv))))))))
+                                (let ((res (proc (lambda (v)
+                                                    (shared-queue-put! queue v)))))
+                                   ;; make sure we return eof-object
+                                   (shared-queue-put! queue (eof-object))))))))
           (lambda ()
              (case state
                 ((init)
-                 (synchronize mutex
-                    (set! state 'running)
-                    (set! result +corroutine-calling+)
-                    (start)
-                    (wait-on-condition! condv mutex
-                       (lambda () (not (eq? result +corroutine-calling+))))
-                    result))
+                 (set! state 'running)
+                 (start)
+                 (shared-queue-get! queue))
                 ((running)
-                 (synchronize mutex
-                    (set! result +corroutine-calling+)
-                    (condition-variable-signal! condv)
-                    (wait-on-condition! condv mutex
-                       (lambda () (not (eq? result +corroutine-calling+))))
-                    result))
+                 (let ((res (shared-queue-get! queue)))
+                    (when (eof-object? res)
+                       (set! state 'finished))
+                    res))
                 (else
-                 result)))))
-    ))
+                 (eof-object))))))))
 
 
 ;; list->generator

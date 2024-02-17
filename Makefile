@@ -6,7 +6,7 @@
 # This is the project version
 # It will be used in setting the version information in library init files
 # as well as used in the name of generated libraries
-VERSION = 1.0
+VERSION = 0.7
 
 # Build Tools
 BIGLOO = bigloo
