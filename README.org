@@ -7,7 +7,7 @@ Both the Bigloo native and jvm backends are supported. The SRFI 158 library requ
 
 The library has a few depencies. They are the pthread library provided with Bigloo,  [[https://github.com/donaldsonjw/bigloo-concurrent][bigloo-concurrent]], and [[https://github.com/donaldsonjw/srfi117][SRFI 117 - List-based Queues]]. All need to be installed before building.
 
-The library passes all of the SRFI 158 tests. To run the tests, S[[https://github.com/donaldsonjw/srfi64][RFI 64]]
+The library passes all of the SRFI 158 tests. To run the tests, [[https://github.com/donaldsonjw/srfi64][SRFI 64]]
 is required.
 
 * Building
