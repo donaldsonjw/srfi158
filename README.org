@@ -3,9 +3,9 @@
 ** Description
 The srfi158 library is an implementation of [[https://srfi.schemers.org/srfi-158/srfi-158.html][SRFI 158]] for Bigloo scheme. It is an adaption of the sample implementation.
 
-Both the Bigloo native and jvm backends are supported. The library requires coroutines, and the sample implementation, unsurprisingly, leverages call/cc for its implementation. Unfortunately, Bigloo's support for call/cc is poor, so this library instead provides 2 different, non call/cc-based coroutine implementations. The native backend implements coroutines via the [[https://www.man7.org/linux/man-pages/man3/makecontext.3.html][makecontext]] family of procedures, and the jvm backend uses a thread-based implementation. In my, admittedly, unscientific benchmarking, both implementations are within 1-2x the speed of a simple non coroutine-based loop when yielding the values of a large vector.
+Both the Bigloo native and jvm backends are supported. The SRFI 158 library requires coroutines, and the sample implementation, unsurprisingly, leverages call/cc for its implementation. Unfortunately, Bigloo's support for call/cc is poor, so this library instead provides 2 different, non call/cc-based coroutine implementations. The native backend implements coroutines via the [[https://www.man7.org/linux/man-pages/man3/makecontext.3.html][makecontext]] family of procedures, and the jvm backend uses a thread-based implementation. In my, admittedly unscientific, benchmarking, both implementations are within 1-2x the speed of a simple non coroutine-based loop when yielding the values of a large vector.
 
-The library has a few of depencies. They are the pthread library provided with Bigloo,  [[https://github.com/donaldsonjw/bigloo-concurrent][bigloo-concurrent]], and [[https://github.com/donaldsonjw/srfi117][SRFI 117 - List-based Queues]]. All need to be installed before building.
+The library has a few depencies. They are the pthread library provided with Bigloo,  [[https://github.com/donaldsonjw/bigloo-concurrent][bigloo-concurrent]], and [[https://github.com/donaldsonjw/srfi117][SRFI 117 - List-based Queues]]. All need to be installed before building.
 
 The library passes all of the SRFI 158 tests. To run the tests, S[[https://github.com/donaldsonjw/srfi64][RFI 64]]
 is required.
@@ -38,5 +38,5 @@ To run the tests execute:
 
 All SRFI 158 procedures are supported. Full documentation can be found in the [[https://srfi.schemers.org/srfi-158/srfi-158.html][SRFI 158 document]].
 
-The only deviation is a =make-coroutine-generator= which takes an optional =buffer-size= in addition to the required procedure. In the thread-based implemenation, this sets the size of the queue used to buffer data between the consuming and producing corroutines. It is not used in the makecontext-based implementation.
+The only deviation is a =make-coroutine-generator= which takes an optional =buffer-size= in addition to the required procedure. The default =buffer-size= is 8. In the thread-based implemenation, this sets the maximum size of the queue used to buffer data between the consuming and producing corroutines. It is not used in the makecontext-based implementation.
 

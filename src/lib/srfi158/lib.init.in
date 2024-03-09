@@ -32,7 +32,7 @@
 
 
 (cond-expand
-   ((and bigloo-jvm bigloo-compile)
+   (bigloo-compile
     (use-library! 'pthread)
     (use-library! 'bigloo-concurrent)
     (use-library! 'srfi117))

@@ -25,11 +25,8 @@
 ;;;; OTHER DEALINGS IN THE SOFTWARE.
 
 (module srfi158
-   (cond-expand
-      (bigloo-jvm
-       (library pthread
-            bigloo-concurrent)))
-   
+   (library pthread
+            bigloo-concurrent)
    (extern
       (include "cnumprocs.h")
       (macro $get-number-of-processors::long ()
@@ -269,10 +266,10 @@
 (cond-expand
 
    ;; For the native backend, we use actual coroutines, based on
-   ;; makecontext, for make-coroutine-generator. In my, admittedly,
-   ;; unscientific benchmarking, it is slightly faster
-   ;; than the thread-based implementation.
-   (bigloo-c
+   ;; makecontext, for make-coroutine-generator.  In my, admittedly,
+   ;; unscientific benchmarking, it is slightly faster than the
+   ;; thread-based implementation.
+   ((and bigloo-c) 
     
     (define (make-coroutine-generator proc::procedure #!optional (buffer-size 8))
        (letrec  ((thunk (lambda () (let ((res (proc (lambda (v)
@@ -282,9 +279,8 @@
           (lambda ()
              ($coroutine-call cor)))))
 
-   ;; For the jvm backend, we use threads and a dedicated threadpool to emulate coroutines. 
-   (bigloo-jvm
-
+   ;; For the , we use threads and a dedicated threadpool to emulate coroutines. 
+   (else
     (define +generator-mutex+ (make-mutex))
     (define +generator-thread-pool+ #unspecified)
     (define (generator-thread-pool)
@@ -296,7 +292,6 @@
     (define (make-coroutine-generator proc::procedure #!optional (buffer-size 8))
        (letrec ((state 'init)
                 (queue (make-shared-queue buffer-size))
-                (result #unspecified)
                 (start (lambda ()
                           (thread-pool-push-task! (generator-thread-pool)
                              (lambda ()
